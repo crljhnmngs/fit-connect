@@ -1,0 +1,141 @@
+name: Keep Supabase Active
+
+on:
+    schedule:
+        # Runs every 5 days at 00:00 UTC
+        - cron: '0 0 */5 * *'
+
+    # Allows manual trigger from Actions tab
+    workflow_dispatch:
+
+jobs:
+    ping-supabase:
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+
+        steps:
+            - name: Ping Supabase Database
+              id: ping
+              env:
+                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+                  SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+              run: |
+                  MAX_RETRIES=3
+                  RETRY_DELAY=10
+                  SUCCESS=false
+
+                  for attempt in $(seq 1 $MAX_RETRIES); do
+                      echo "Attempt $attempt of $MAX_RETRIES..."
+                      
+                      response=$(curl --max-time 30 -s -w "\n%{http_code}" -X GET \
+                        "${SUPABASE_URL}/rest/v1/exercises?select=id&limit=1" \
+                        -H "apikey: ${SUPABASE_ANON_KEY}" \
+                        -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+
+                      http_code=$(echo "$response" | tail -n1)
+                      body=$(echo "$response" | sed '$d')
+
+                      echo "HTTP Status: $http_code"
+                      echo "Response: $body"
+
+                      if [ "$http_code" -eq 200 ]; then
+                          echo "Successfully pinged Supabase on attempt $attempt!"
+                          SUCCESS=true
+                          break
+                      else
+                          echo "Attempt $attempt failed with status $http_code"
+                          if [ $attempt -lt $MAX_RETRIES ]; then
+                              echo "Waiting ${RETRY_DELAY}s before retry..."
+                              sleep $RETRY_DELAY
+                          fi
+                      fi
+                  done
+
+                  if [ "$SUCCESS" = false ]; then
+                      echo "::error::Failed to ping Supabase after $MAX_RETRIES attempts"
+                      exit 1
+                  fi
+
+            - name: Send Discord Notification on Failure
+              if: failure()
+              env:
+                  DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+              run: |
+                  curl -H "Content-Type: application/json" \
+                    -X POST \
+                    -d '{
+                      "embeds": [{
+                        "title": "Supabase Keep-Alive Failed",
+                        "description": "The Supabase ping workflow failed after 3 retry attempts.",
+                        "color": 15158332,
+                        "fields": [
+                          {
+                            "name": "Repository",
+                            "value": "${{ github.repository }}",
+                            "inline": true
+                          },
+                          {
+                            "name": "Workflow",
+                            "value": "${{ github.workflow }}",
+                            "inline": true
+                          },
+                          {
+                            "name": "Time",
+                            "value": "'"$(date -u '+%Y-%m-%d %H:%M:%S UTC')"'",
+                            "inline": false
+                          },
+                          {
+                            "name": "Action Required",
+                            "value": "• Check Supabase project status\n• Verify GitHub secrets\n• Confirm exercises table exists",
+                            "inline": false
+                          },
+                          {
+                            "name": "View Logs",
+                            "value": "[Click here](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+                            "inline": false
+                          }
+                        ],
+                        "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'"
+                      }]
+                    }' \
+                    "${DISCORD_WEBHOOK_URL}"
+
+            - name: Send Discord Notification on Success
+              if: success()
+              env:
+                  DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+              run: |
+                  curl -H "Content-Type: application/json" \
+                    -X POST \
+                    -d '{
+                      "embeds": [{
+                        "title": "Supabase Keep-Alive Successful",
+                        "description": "Supabase database pinged successfully.",
+                        "color": 3066993,
+                        "fields": [
+                          {
+                            "name": "Repository",
+                            "value": "${{ github.repository }}",
+                            "inline": true
+                          },
+                          {
+                            "name": "Next Run",
+                            "value": "~5 days",
+                            "inline": true
+                          }
+                        ],
+                        "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'"
+                      }]
+                    }' \
+                    "${DISCORD_WEBHOOK_URL}"
+
+            - name: Report Status
+              if: always()
+              run: |
+                  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  echo "Workflow Status Report"
+                  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  echo "Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+                  echo "Job status: ${{ job.status }}"
+                  echo "Next scheduled run: ~5 days from now"
+                  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
