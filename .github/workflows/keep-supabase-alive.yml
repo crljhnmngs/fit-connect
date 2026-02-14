@@ -120,7 +120,7 @@ jobs:
                           },
                           {
                             "name": "Next Run",
-                            "value": "~5 days",
+                            "value": "Scheduled per workflow cron",
                             "inline": true
                           }
                         ],
@@ -137,5 +137,5 @@ jobs:
                   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                   echo "Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
                   echo "Job status: ${{ job.status }}"
-                  echo "Next scheduled run: ~5 days from now"
+                  echo "Next scheduled run: according to workflow cron"
                   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
